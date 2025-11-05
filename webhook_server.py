@@ -55,6 +55,11 @@ async def incoming_call(request: Request):
         
         logger.info(f"📞 Incoming call: {call_sid} from {from_number} to {to_number}")
         
+        # Debug: Check if credentials are available
+        logger.info(f"🔧 LiveKit URL configured: {bool(Config.LIVEKIT_URL)}")
+        logger.info(f"🔧 LiveKit API Key configured: {bool(Config.LIVEKIT_API_KEY)}")
+        logger.info(f"🔧 LiveKit API Secret configured: {bool(Config.LIVEKIT_API_SECRET)}")
+        
         # Track active call
         active_calls.add(call_sid)
         
@@ -119,12 +124,15 @@ async def incoming_call(request: Request):
         )
         
     except Exception as e:
-        logger.error(f"Error handling incoming call: {e}", exc_info=True)
+        logger.error(f"❌ Error handling incoming call: {e}", exc_info=True)
+        logger.error(f"❌ Error type: {type(e).__name__}")
+        logger.error(f"❌ Error details: {str(e)}")
         
-        # Return error TwiML
-        error_twiml = """<?xml version="1.0" encoding="UTF-8"?>
+        # Return error TwiML with more specific message
+        error_message = f"Sorry, there was an error. Error type: {type(e).__name__}. Please check server logs."
+        error_twiml = f"""<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-    <Say voice="Polly.Joanna">Sorry, there was an error connecting your call. Please try again later.</Say>
+    <Say voice="Polly.Joanna">{error_message}</Say>
     <Hangup/>
 </Response>"""
         
