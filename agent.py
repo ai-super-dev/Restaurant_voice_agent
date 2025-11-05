@@ -51,19 +51,19 @@ async def entrypoint(ctx: JobContext):
         # Import TurnDetection for proper VAD configuration
         from livekit.plugins.openai.realtime.realtime_model import TurnDetection
         
-        # Create RealtimeModel with optimized settings for <1s latency
+        # Create RealtimeModel with production-optimized settings
         # CRITICAL: Use ONLY OpenAI's Server VAD - NO local VAD
-        # Higher threshold prevents false interruptions (cancellations)
-        # Lower silence_duration reduces latency
+        # Production (cloud) needs higher threshold for network stability
+        # Slightly higher silence_duration accounts for network latency
         realtime_model = openai.realtime.RealtimeModel(
             voice=Config.VOICE_MODEL,
             temperature=0.8,
             modalities=["text", "audio"],
             turn_detection=TurnDetection(
                 type="server_vad",
-                threshold=0.65,  # Higher = fewer false interruptions (prevents cancelled)
-                prefix_padding_ms=200,  # Reduced for faster response
-                silence_duration_ms=300,  # Reduced for <1s latency (was 500ms)
+                threshold=0.7,  # Higher for production stability (cloud deployment)
+                prefix_padding_ms=300,  # Standard for network reliability
+                silence_duration_ms=400,  # Balanced for cloud + <1s latency
             ),
         )
         
@@ -83,10 +83,11 @@ async def entrypoint(ctx: JobContext):
         logger.info(f"💡 Speak first to start - say 'Hello'")
         await session.start(agent, room=ctx.room)
         
-        logger.info(f"✅ Realtime agent ready - optimized for <1s latency!")
-        logger.info(f"✅ VAD threshold: 0.65 (high - prevents cancellations)")
-        logger.info(f"✅ Silence duration: 300ms (low - faster responses)")
-        logger.info(f"✅ Expected latency: 500-800ms")
+        logger.info(f"✅ Realtime agent ready - PRODUCTION optimized!")
+        logger.info(f"✅ VAD threshold: 0.7 (production-grade stability)")
+        logger.info(f"✅ Silence duration: 400ms (cloud-optimized)")
+        logger.info(f"✅ Expected latency: 600-900ms (including network)")
+        logger.info(f"✅ Deployment: Cloud-ready (Render.com, etc.)")
         
         # Keep the session running until disconnect
         while ctx.room.connection_state == rtc.ConnectionState.CONN_CONNECTED:
@@ -119,14 +120,15 @@ def main():
     logger.info(f"   - TTS Fallback: ENABLED (prevents cancelled responses)")
     logger.info(f"   - Voice Model: {Config.VOICE_MODEL}")
     logger.info("")
-    logger.info("📊 Performance settings (optimized for <1s latency):")
-    logger.info(f"   - Server VAD threshold: 0.65 (high - prevents false interruptions)")
-    logger.info(f"   - Prefix padding: 200ms (low - faster capture)")
-    logger.info(f"   - Silence duration: 300ms (low - faster turn-taking)")
-    logger.info(f"   - Expected latency: 500-800ms")
+    logger.info("📊 Performance settings (PRODUCTION optimized):")
+    logger.info(f"   - Server VAD threshold: 0.7 (production-grade)")
+    logger.info(f"   - Prefix padding: 300ms (network-stable)")
+    logger.info(f"   - Silence duration: 400ms (cloud-optimized)")
+    logger.info(f"   - Expected latency: 600-900ms (including network)")
     logger.info(f"   - NO local VAD (avoids conflicts)")
     logger.info(f"   - Auto-subscribe: Audio only")
     logger.info(f"   - Full-duplex streaming: Enabled")
+    logger.info(f"   - Cloud deployment: Ready (Render.com compatible)")
     logger.info("")
     logger.info("=" * 80)
     logger.info("✓ Agent is ready with <1s latency optimization!")
