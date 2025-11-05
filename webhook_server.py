@@ -1,12 +1,21 @@
 """
 Twilio Webhook Server
 Handles incoming phone calls and connects them to LiveKit rooms
+
+IMPORTANT: This implementation uses Twilio Media Streams to bridge phone audio to LiveKit.
+For production use, LiveKit SIP Trunk integration is recommended as it's more reliable
+and handles all audio conversion automatically.
 """
 
 import logging
-from fastapi import FastAPI, Request, Response
+import json
+import base64
+import asyncio
+import audioop
+import numpy as np
+from fastapi import FastAPI, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.responses import PlainTextResponse
-from livekit import api
+from livekit import api, rtc
 import uvicorn
 from config import Config
 
@@ -44,7 +53,7 @@ async def health():
 async def incoming_call(request: Request):
     """
     Handle incoming Twilio calls
-    This endpoint receives webhook from Twilio when a call comes in
+    Uses Twilio Media Streams to connect phone audio to LiveKit room
     """
     try:
         # Get call details from Twilio
@@ -55,61 +64,36 @@ async def incoming_call(request: Request):
         
         logger.info(f"📞 Incoming call: {call_sid} from {from_number} to {to_number}")
         
-        # Debug: Check if credentials are available
-        logger.info(f"🔧 LiveKit URL configured: {bool(Config.LIVEKIT_URL)}")
-        logger.info(f"🔧 LiveKit API Key configured: {bool(Config.LIVEKIT_API_KEY)}")
-        logger.info(f"🔧 LiveKit API Secret configured: {bool(Config.LIVEKIT_API_SECRET)}")
-        
         # Track active call
         active_calls.add(call_sid)
         
         # Create a unique room name for this call
         room_name = f"call-{call_sid}"
         
-        # Generate LiveKit token for the participant
-        token = api.AccessToken(
-            Config.LIVEKIT_API_KEY,
-            Config.LIVEKIT_API_SECRET
-        )
-        token.with_identity(f"caller-{from_number}")
-        token.with_name(f"Caller {from_number}")
-        token.with_grants(api.VideoGrants(
-            room_join=True,
-            room=room_name,
-            can_publish=True,
-            can_subscribe=True,
-        ))
+        logger.info(f"✓ Created room '{room_name}' for call {call_sid}")
         
-        jwt_token = token.to_jwt()
+        # Get the public URL for the WebSocket endpoint
+        # In production, this should be your deployed URL
+        # For local testing with ngrok, this will be your ngrok URL
+        webhook_base_url = request.url.scheme + "://" + request.url.netloc
+        stream_url = f"{webhook_base_url.replace('http', 'ws')}/media-stream"
         
-        # Create TwiML response
-        # For real phone integration with LiveKit, you have 2 main options:
+        logger.info(f"🔗 Stream URL: {stream_url}")
         
-        # OPTION 1: LiveKit SIP (Recommended for Production)
-        # - Requires: LiveKit Cloud with SIP enabled (paid feature)
-        # - Pro: Simple, reliable, production-ready
-        # - Con: Requires subscription
-        
-        # OPTION 2: Custom Bridge Server
-        # - Requires: Build a WebSocket bridge between Twilio Media Streams and LiveKit
-        # - Pro: Free
-        # - Con: Complex to implement
-        
-        # For now, returning a friendly message
+        # Create TwiML response with Media Streams
+        # This streams bidirectional audio between Twilio and our WebSocket handler
         twiml_response = f"""<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-    <Say voice="Polly.Joanna">
-        Hello! Your webhook and LiveKit agent are ready.
-        However, connecting Twilio calls to LiveKit requires either LiveKit SIP integration
-        or a custom Media Streams bridge.
-        Please check the documentation for setup instructions.
-    </Say>
-    <Pause length="1"/>
-    <Say voice="Polly.Joanna">For now, you can test the AI agent using LiveKit Agents Playground.</Say>
-    <Hangup/>
+    <Connect>
+        <Stream url="{stream_url}">
+            <Parameter name="callSid" value="{call_sid}"/>
+            <Parameter name="roomName" value="{room_name}"/>
+            <Parameter name="fromNumber" value="{from_number}"/>
+        </Stream>
+    </Connect>
 </Response>"""
         
-        logger.info(f"✓ Created room '{room_name}' for call {call_sid}")
+        logger.info(f"✓ TwiML response created for {call_sid}")
         logger.info(f"Active calls: {len(active_calls)}")
         
         return Response(
@@ -119,14 +103,11 @@ async def incoming_call(request: Request):
         
     except Exception as e:
         logger.error(f"❌ Error handling incoming call: {e}", exc_info=True)
-        logger.error(f"❌ Error type: {type(e).__name__}")
-        logger.error(f"❌ Error details: {str(e)}")
         
-        # Return error TwiML with more specific message
-        error_message = f"Sorry, there was an error. Error type: {type(e).__name__}. Please check server logs."
-        error_twiml = f"""<?xml version="1.0" encoding="UTF-8"?>
+        # Return error TwiML
+        error_twiml = """<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-    <Say voice="Polly.Joanna">{error_message}</Say>
+    <Say voice="Polly.Joanna">Sorry, there was an error connecting your call. Please try again later.</Say>
     <Hangup/>
 </Response>"""
         
@@ -134,6 +115,182 @@ async def incoming_call(request: Request):
             content=error_twiml,
             media_type="application/xml"
         )
+
+
+@app.websocket("/media-stream")
+async def media_stream(websocket: WebSocket):
+    """
+    WebSocket endpoint for Twilio Media Streams
+    Bridges audio between Twilio phone call and LiveKit room
+    """
+    await websocket.accept()
+    logger.info("📡 Media stream WebSocket connected")
+    
+    call_sid = None
+    room_name = None
+    room = None
+    audio_source = None
+    
+    try:
+        # Wait for start message from Twilio
+        while True:
+            try:
+                message = await websocket.receive_text()
+                data = json.loads(message)
+                event_type = data.get("event")
+                
+                if event_type == "start":
+                    # Extract call parameters
+                    stream_sid = data.get("streamSid")
+                    call_sid = data.get("start", {}).get("callSid")
+                    custom_params = data.get("start", {}).get("customParameters", {})
+                    room_name = custom_params.get("roomName")
+                    from_number = custom_params.get("fromNumber")
+                    
+                    logger.info(f"🎬 Stream started: {stream_sid} for call {call_sid}")
+                    logger.info(f"🎯 Connecting to LiveKit room: {room_name}")
+                    
+                    # Connect to LiveKit room
+                    room = rtc.Room()
+                    
+                    # Generate token for this phone caller
+                    token = api.AccessToken(
+                        Config.LIVEKIT_API_KEY,
+                        Config.LIVEKIT_API_SECRET
+                    )
+                    token.with_identity(f"phone-{from_number}")
+                    token.with_name(f"Phone Caller")
+                    token.with_grants(api.VideoGrants(
+                        room_join=True,
+                        room=room_name,
+                        can_publish=True,
+                        can_subscribe=True,
+                    ))
+                    
+                    # Connect to the room
+                    await room.connect(Config.LIVEKIT_URL, token.to_jwt())
+                    logger.info(f"✓ Connected to LiveKit room: {room_name}")
+                    
+                    # Create audio source for phone audio
+                    audio_source = rtc.AudioSource(8000, 1)  # 8kHz mono (Twilio's format)
+                    track = rtc.LocalAudioTrack.create_audio_track("phone-audio", audio_source)
+                    options = rtc.TrackPublishOptions()
+                    options.source = rtc.TrackSource.SOURCE_MICROPHONE
+                    
+                    # Publish the audio track to LiveKit
+                    await room.local_participant.publish_track(track, options)
+                    logger.info(f"✓ Published phone audio track to room")
+                    
+                    # Set up event handler for remote tracks (agent's audio)
+                    @room.on("track_subscribed")
+                    def on_track_subscribed(track: rtc.Track, publication: rtc.RemoteTrackPublication, participant: rtc.RemoteParticipant):
+                        """Handle when we receive audio from the agent"""
+                        if track.kind == rtc.TrackKind.KIND_AUDIO:
+                            logger.info(f"🎧 Subscribed to agent audio track from {participant.identity}")
+                            asyncio.create_task(stream_agent_audio_to_twilio(track, stream_sid, websocket))
+                    
+                    async def stream_agent_audio_to_twilio(track, stream_sid, ws):
+                        """Stream agent's audio back to Twilio phone call"""
+                        try:
+                            audio_stream = rtc.AudioStream(track)
+                            logger.info("📤 Starting to stream agent audio to Twilio")
+                            
+                            async for audio_frame in audio_stream:
+                                try:
+                                    # Get PCM audio data from LiveKit
+                                    # AudioFrame provides data as int16 PCM
+                                    pcm_data = audio_frame.data.tobytes()
+                                    
+                                    # Resample from 48kHz (LiveKit) to 8kHz (Twilio) if needed
+                                    if audio_frame.sample_rate != 8000:
+                                        pcm_data, _ = audioop.ratecv(
+                                            pcm_data,
+                                            2,  # 2 bytes per sample (int16)
+                                            audio_frame.num_channels,
+                                            audio_frame.sample_rate,
+                                            8000,  # Target: 8kHz for Twilio
+                                            None
+                                        )
+                                    
+                                    # Convert stereo to mono if needed
+                                    if audio_frame.num_channels == 2:
+                                        pcm_data = audioop.tomono(pcm_data, 2, 1, 1)
+                                    
+                                    # Convert PCM to mulaw (Twilio's format)
+                                    mulaw_data = audioop.lin2ulaw(pcm_data, 2)
+                                    
+                                    # Base64 encode for Twilio
+                                    encoded_audio = base64.b64encode(mulaw_data).decode('utf-8')
+                                    
+                                    # Send to Twilio
+                                    media_msg = {
+                                        "event": "media",
+                                        "streamSid": stream_sid,
+                                        "media": {
+                                            "payload": encoded_audio
+                                        }
+                                    }
+                                    await ws.send_text(json.dumps(media_msg))
+                                    
+                                except Exception as e:
+                                    logger.error(f"Error processing audio frame: {e}")
+                                    
+                        except Exception as e:
+                            logger.error(f"Error streaming agent audio to Twilio: {e}", exc_info=True)
+                    
+                elif event_type == "media":
+                    # Receive audio from phone and send to LiveKit
+                    if audio_source:
+                        media_payload = data.get("media", {}).get("payload")
+                        if media_payload:
+                            try:
+                                # Decode mulaw audio from Twilio (base64 encoded)
+                                mulaw_data = base64.b64decode(media_payload)
+                                
+                                # Convert mulaw to PCM int16
+                                pcm_data = audioop.ulaw2lin(mulaw_data, 2)
+                                
+                                # Convert to numpy array for LiveKit
+                                # Twilio sends 8kHz mono, 20ms chunks (160 samples)
+                                audio_array = np.frombuffer(pcm_data, dtype=np.int16)
+                                
+                                # Create AudioFrame for LiveKit
+                                audio_frame = rtc.AudioFrame(
+                                    data=audio_array,
+                                    sample_rate=8000,
+                                    num_channels=1,
+                                    samples_per_channel=len(audio_array)
+                                )
+                                
+                                # Send to LiveKit room
+                                await audio_source.capture_frame(audio_frame)
+                                
+                            except Exception as e:
+                                logger.error(f"Error processing incoming audio: {e}")
+                
+                elif event_type == "stop":
+                    logger.info(f"🛑 Stream stopped for call {call_sid}")
+                    break
+                    
+            except json.JSONDecodeError as e:
+                logger.error(f"Invalid JSON from Twilio: {e}")
+                continue
+            except WebSocketDisconnect:
+                logger.info(f"📞 WebSocket disconnected for call {call_sid}")
+                break
+            except Exception as e:
+                logger.error(f"Error in media stream: {e}", exc_info=True)
+                break
+    
+    finally:
+        # Cleanup
+        if room:
+            await room.disconnect()
+            logger.info(f"✓ Disconnected from LiveKit room")
+        
+        if call_sid:
+            active_calls.discard(call_sid)
+            logger.info(f"✓ Cleaned up call {call_sid}")
 
 
 @app.post("/call-status")
