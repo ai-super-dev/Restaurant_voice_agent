@@ -83,35 +83,29 @@ async def incoming_call(request: Request):
         jwt_token = token.to_jwt()
         
         # Create TwiML response
-        # IMPORTANT: Choose ONE of the following approaches:
+        # For real phone integration with LiveKit, you have 2 main options:
         
-        # APPROACH 1: LiveKit SIP Integration (if you have SIP enabled)
-        # Requires: LiveKit Cloud account with SIP enabled
-        USE_LIVEKIT_SIP = False  # Change to True if you have LiveKit SIP enabled
+        # OPTION 1: LiveKit SIP (Recommended for Production)
+        # - Requires: LiveKit Cloud with SIP enabled (paid feature)
+        # - Pro: Simple, reliable, production-ready
+        # - Con: Requires subscription
         
-        if USE_LIVEKIT_SIP:
-            # Connect via LiveKit SIP
-            sip_uri = f"sip:{room_name}@sip.livekit.cloud"
-            twiml_response = f"""<?xml version="1.0" encoding="UTF-8"?>
-<Response>
-    <Say voice="Polly.Joanna">Connecting you to the AI assistant.</Say>
-    <Dial>
-        <Sip>{sip_uri}</Sip>
-    </Dial>
-</Response>"""
-        else:
-            # APPROACH 2: Simple Test Response (for testing webhook only)
-            # This confirms your webhook is working but doesn't connect to agent yet
-            twiml_response = f"""<?xml version="1.0" encoding="UTF-8"?>
+        # OPTION 2: Custom Bridge Server
+        # - Requires: Build a WebSocket bridge between Twilio Media Streams and LiveKit
+        # - Pro: Free
+        # - Con: Complex to implement
+        
+        # For now, returning a friendly message
+        twiml_response = f"""<?xml version="1.0" encoding="UTF-8"?>
 <Response>
     <Say voice="Polly.Joanna">
-        Hello! Your webhook is working correctly. 
-        Call ID is {call_sid[:8]}.
-        To connect with the AI agent, you need to enable LiveKit SIP integration.
-        Check the setup guide for details.
+        Hello! Your webhook and LiveKit agent are ready.
+        However, connecting Twilio calls to LiveKit requires either LiveKit SIP integration
+        or a custom Media Streams bridge.
+        Please check the documentation for setup instructions.
     </Say>
     <Pause length="1"/>
-    <Say voice="Polly.Joanna">Goodbye!</Say>
+    <Say voice="Polly.Joanna">For now, you can test the AI agent using LiveKit Agents Playground.</Say>
     <Hangup/>
 </Response>"""
         
