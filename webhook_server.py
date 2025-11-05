@@ -77,17 +77,37 @@ async def incoming_call(request: Request):
         
         jwt_token = token.to_jwt()
         
-        # Create TwiML response to connect call to LiveKit
-        # Using <Connect> with <Stream> to establish WebSocket connection
-        twiml_response = f"""<?xml version="1.0" encoding="UTF-8"?>
+        # Create TwiML response
+        # IMPORTANT: Choose ONE of the following approaches:
+        
+        # APPROACH 1: LiveKit SIP Integration (if you have SIP enabled)
+        # Requires: LiveKit Cloud account with SIP enabled
+        USE_LIVEKIT_SIP = False  # Change to True if you have LiveKit SIP enabled
+        
+        if USE_LIVEKIT_SIP:
+            # Connect via LiveKit SIP
+            sip_uri = f"sip:{room_name}@sip.livekit.cloud"
+            twiml_response = f"""<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-    <Say voice="Polly.Joanna">Connecting you to the AI assistant. Please wait.</Say>
-    <Connect>
-        <Stream url="wss://{Config.LIVEKIT_URL.replace('wss://', '').replace('ws://', '')}/sip">
-            <Parameter name="token" value="{jwt_token}" />
-            <Parameter name="room" value="{room_name}" />
-        </Stream>
-    </Connect>
+    <Say voice="Polly.Joanna">Connecting you to the AI assistant.</Say>
+    <Dial>
+        <Sip>{sip_uri}</Sip>
+    </Dial>
+</Response>"""
+        else:
+            # APPROACH 2: Simple Test Response (for testing webhook only)
+            # This confirms your webhook is working but doesn't connect to agent yet
+            twiml_response = f"""<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+    <Say voice="Polly.Joanna">
+        Hello! Your webhook is working correctly. 
+        Call ID is {call_sid[:8]}.
+        To connect with the AI agent, you need to enable LiveKit SIP integration.
+        Check the setup guide for details.
+    </Say>
+    <Pause length="1"/>
+    <Say voice="Polly.Joanna">Goodbye!</Say>
+    <Hangup/>
 </Response>"""
         
         logger.info(f"✓ Created room '{room_name}' for call {call_sid}")
