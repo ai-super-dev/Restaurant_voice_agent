@@ -1,0 +1,25 @@
+# LiveKit and Agents (let pip resolve compatible versions)
+livekit>=0.16.3
+livekit-agents>=0.9.0
+livekit-plugins-openai>=0.7.0
+livekit-plugins-silero>=0.6.0
+
+# Twilio
+twilio>=9.2.0
+
+# Web Framework for webhook server
+fastapi>=0.109.0
+uvicorn>=0.27.0
+
+# Environment variables
+python-dotenv>=1.0.0
+
+# Async support (required by livekit-agents)
+aiohttp>=3.10.0
+
+# Audio processing
+numpy>=1.24.0
+
+# Logging
+colorlog>=6.8.0
+
