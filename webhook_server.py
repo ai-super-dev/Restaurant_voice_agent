@@ -11,8 +11,14 @@ import logging
 import json
 import base64
 import asyncio
-import audioop
 import numpy as np
+
+# Use audioop-lts for Python 3.13+ compatibility
+try:
+    import audioop
+except ModuleNotFoundError:
+    # Python 3.13+ removed audioop, use audioop-lts instead
+    import audioop_lts as audioop
 from fastapi import FastAPI, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.responses import PlainTextResponse
 from livekit import api, rtc
