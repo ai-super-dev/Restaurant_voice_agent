@@ -201,25 +201,28 @@ async def media_stream(websocket: WebSocket):
                             audio_stream = rtc.AudioStream(track)
                             logger.info("📤 Starting to stream agent audio to Twilio")
                             
-                            async for audio_frame in audio_stream:
+                            async for audio_frame_event in audio_stream:
                                 try:
+                                    # Get the actual AudioFrame from the event
+                                    frame = audio_frame_event.frame
+                                    
                                     # Get PCM audio data from LiveKit
                                     # AudioFrame provides data as int16 PCM
-                                    pcm_data = audio_frame.data.tobytes()
+                                    pcm_data = frame.data.tobytes()
                                     
                                     # Resample from 48kHz (LiveKit) to 8kHz (Twilio) if needed
-                                    if audio_frame.sample_rate != 8000:
+                                    if frame.sample_rate != 8000:
                                         pcm_data, _ = audioop.ratecv(
                                             pcm_data,
                                             2,  # 2 bytes per sample (int16)
-                                            audio_frame.num_channels,
-                                            audio_frame.sample_rate,
+                                            frame.num_channels,
+                                            frame.sample_rate,
                                             8000,  # Target: 8kHz for Twilio
                                             None
                                         )
                                     
                                     # Convert stereo to mono if needed
-                                    if audio_frame.num_channels == 2:
+                                    if frame.num_channels == 2:
                                         pcm_data = audioop.tomono(pcm_data, 2, 1, 1)
                                     
                                     # Convert PCM to mulaw (Twilio's format)
