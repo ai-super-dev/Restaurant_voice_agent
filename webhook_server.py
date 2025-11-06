@@ -355,22 +355,51 @@ def main():
     logger.info("=" * 60)
     
     # Start server with PERFORMANCE optimizations
-    # Detect if uvloop is available (Unix only)
     import sys
-    loop_type = "uvloop" if sys.platform != "win32" else "asyncio"
+    import os
     
-    uvicorn.run(
-        app,
-        host=Config.WEBHOOK_HOST,
-        port=Config.WEBHOOK_PORT,
-        log_level="warning",  # Minimal logging for performance
-        workers=1 if sys.platform == "win32" else min(Config.MAX_WORKERS, 4),  # Windows doesn't support multiple workers with custom loop
-        loop=loop_type,  # uvloop on Unix, asyncio on Windows
-        access_log=False,  # Disable access logging for performance
-        timeout_keep_alive=75,  # Keep connections alive
-    )
+    # Check if running in cloud environment (Render, Railway, etc.)
+    # Cloud platforms often set PORT environment variable
+    port = int(os.getenv("PORT", Config.WEBHOOK_PORT))
+    host = os.getenv("HOST", Config.WEBHOOK_HOST)
+    
+    # Check if PORT is set (indicates cloud deployment)
+    is_cloud = os.getenv("PORT") is not None
+    
+    if is_cloud:
+        # Cloud deployment: simplified settings for Render/Railway/Fly.io
+        # Single worker, no custom loop (cloud platforms handle this)
+        logger.info("🌐 Cloud environment detected - using cloud-optimized settings")
+        logger.info(f"🌐 Using PORT from environment: {port}")
+        uvicorn.run(
+            app,
+            host=host,
+            port=port,
+            log_level="info",
+            access_log=False,
+            timeout_keep_alive=75,
+        )
+    else:
+        # Local deployment: can use uvloop and workers
+        loop_type = "uvloop" if sys.platform != "win32" else "asyncio"
+        uvicorn.run(
+            app,
+            host=host,
+            port=port,
+            log_level="warning",  # Minimal logging for performance
+            workers=1 if sys.platform == "win32" else min(Config.MAX_WORKERS, 4),
+            loop=loop_type,  # uvloop on Unix, asyncio on Windows
+            access_log=False,  # Disable access logging for performance
+            timeout_keep_alive=75,  # Keep connections alive
+        )
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        logger.info("\n👋 Shutting down webhook server...")
+    except Exception as e:
+        logger.error(f"❌ Fatal error: {e}", exc_info=True)
+        raise
 

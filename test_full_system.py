@@ -42,20 +42,38 @@ TEST_TO_NUMBER = "+16266813821"
 TEST_MODE = 'local'  # Will be set by command line argument
 
 
-def generate_test_audio(duration_seconds=2, sample_rate=8000):
+def generate_test_audio(duration_seconds=3, sample_rate=8000):
     """
-    Generate test audio signal (sine wave)
-    This simulates someone speaking into the phone
+    Generate test audio signal that better simulates human speech
+    Uses multiple frequencies and amplitude modulation to trigger VAD
     """
     t = np.linspace(0, duration_seconds, int(sample_rate * duration_seconds))
     
-    # Generate a mix of frequencies to simulate voice
-    freq1 = 300  # Lower frequency
-    freq2 = 800  # Higher frequency
-    signal = (np.sin(2 * np.pi * freq1 * t) + np.sin(2 * np.pi * freq2 * t)) / 2
+    # Generate a more complex signal that better mimics speech
+    # Speech typically has fundamental frequency around 100-300 Hz with harmonics
+    fundamental = 200  # Base frequency (typical for male voice)
     
-    # Convert to 16-bit PCM
-    audio_data = (signal * 32767 * 0.5).astype(np.int16)
+    # Create harmonics (speech has multiple frequency components)
+    signal = (
+        np.sin(2 * np.pi * fundamental * t) * 0.4 +           # Fundamental
+        np.sin(2 * np.pi * fundamental * 2 * t) * 0.3 +      # 2nd harmonic
+        np.sin(2 * np.pi * fundamental * 3 * t) * 0.2 +      # 3rd harmonic
+        np.sin(2 * np.pi * 800 * t) * 0.1                    # Higher frequency component
+    )
+    
+    # Add amplitude modulation to simulate speech patterns (louder/quieter)
+    # This helps trigger VAD
+    modulation = 0.5 + 0.5 * np.sin(2 * np.pi * 2 * t)  # 2 Hz modulation
+    signal = signal * modulation
+    
+    # Normalize and convert to 16-bit PCM
+    # Use higher amplitude to ensure it's detected
+    max_val = np.max(np.abs(signal))
+    if max_val > 0:
+        signal = signal / max_val
+    
+    # Scale to 70% of max to ensure good volume (helps trigger VAD)
+    audio_data = (signal * 32767 * 0.7).astype(np.int16)
     
     return audio_data.tobytes()
 
@@ -194,7 +212,8 @@ async def test_websocket_connection_and_audio():
             
             # Step 2: Generate and send test audio (simulate speaking)
             print("\n📤 Generating test audio (simulated speech)...")
-            test_audio_pcm = generate_test_audio(duration_seconds=2, sample_rate=8000)
+            # Generate longer audio (3 seconds) to give VAD more time to detect
+            test_audio_pcm = generate_test_audio(duration_seconds=3, sample_rate=8000)
             test_audio_mulaw = pcm_to_mulaw(test_audio_pcm)
             
             # Split audio into chunks (20ms chunks = 160 bytes for 8kHz)
@@ -202,9 +221,12 @@ async def test_websocket_connection_and_audio():
             chunks = [test_audio_mulaw[i:i+chunk_size] for i in range(0, len(test_audio_mulaw), chunk_size)]
             
             print(f"📤 Sending {len(chunks)} audio chunks (simulating user speech)...")
+            print("   → Using improved speech-like audio to trigger VAD")
+            print("   → Sending 3 seconds of audio for better detection")
             
             sequence = 2
-            for chunk in chunks[:50]:  # Send first 50 chunks (1 second)
+            # Send all chunks (3 seconds = ~150 chunks at 20ms each)
+            for chunk in chunks:
                 media_event = {
                     "event": "media",
                     "sequenceNumber": str(sequence),
@@ -218,23 +240,31 @@ async def test_websocket_connection_and_audio():
                 }
                 await websocket.send(json.dumps(media_event))
                 sequence += 1
-                await asyncio.sleep(0.02)  # 20ms between chunks
+                await asyncio.sleep(0.02)  # 20ms between chunks (real-time)
             
             print("✅ Sent audio chunks to agent")
             print("   → Agent should process this audio")
             print("   → Agent should send response back")
-            print("   → Check agent.py terminal for activity!")
+            
+            if TEST_MODE == 'deployed':
+                print("   → Check LiveKit Cloud dashboard for agent logs")
+            else:
+                print("   → Check agent.py terminal for activity!")
             
             # Step 3: Listen for responses
+            # Wait a bit more for agent to process and respond
+            print("\n⏳ Waiting for agent to process audio...")
+            await asyncio.sleep(1)  # Give agent time to process
+            
             print("\n📥 Listening for agent responses...")
-            print("   (Will listen for 10 seconds)")
+            print("   (Will listen for 15 seconds to allow for response generation)")
             
             responses_received = 0
             media_responses = 0
             
             try:
-                # Set a timeout for receiving messages
-                async with asyncio.timeout(10):
+                # Set a longer timeout for receiving messages (agent needs time to generate response)
+                async with asyncio.timeout(15):
                     while True:
                         try:
                             response = await websocket.recv()
@@ -260,7 +290,7 @@ async def test_websocket_connection_and_audio():
                             break
                             
             except TimeoutError:
-                print("\n⏱️  10 second monitoring period complete")
+                print("\n⏱️  15 second monitoring period complete")
             
             # Step 4: Send STOP event
             stop_event = {
@@ -292,10 +322,26 @@ async def test_websocket_connection_and_audio():
             else:
                 print("\n⚠️  No audio responses received from agent")
                 print("   Possible reasons:")
-                print("   1. Agent not running (check agent.py terminal)")
-                print("   2. LiveKit connection issue (check API keys)")
-                print("   3. OpenAI API issue (check OPENAI_API_KEY)")
-                print("   4. Audio not triggering VAD (try real speech)")
+                if TEST_MODE == 'deployed':
+                    print("   1. Deployed agent not running (check LiveKit Cloud dashboard)")
+                    print("   2. Environment variables not set (OPENAI_API_KEY in dashboard)")
+                    print("   3. LiveKit connection issue (check API keys)")
+                    print("   4. OpenAI API issue (check OPENAI_API_KEY)")
+                    print("   5. Audio not triggering VAD:")
+                    print("      → Simulated audio may not trigger VAD reliably")
+                    print("      → Try with real phone call for best results")
+                    print("      → Check agent logs for 'start reading stream' message")
+                    print("   6. Agent not auto-joining rooms (check agent configuration)")
+                else:
+                    print("   1. Agent not running (check agent.py terminal)")
+                    print("   2. LiveKit connection issue (check API keys)")
+                    print("   3. OpenAI API issue (check OPENAI_API_KEY)")
+                    print("   4. Audio not triggering VAD:")
+                    print("      → Simulated audio may not trigger VAD reliably")
+                    print("      → Check agent logs - if you see 'start reading stream',")
+                    print("        the agent is receiving audio but not detecting speech")
+                    print("      → Try with real phone call for best results")
+                    print("   5. Check agent logs for OpenAI API errors")
                 return False
                 
     except Exception as e:
@@ -335,11 +381,24 @@ async def run_full_system_test():
     print("=" * 60)
     print("        FULL SYSTEM TEST - SIMULATED PHONE CALL")
     print("=" * 60)
-    print("\n⚠️  IMPORTANT REQUIREMENTS:")
-    print("   1. agent.py MUST be running (Terminal 1)")
-    print("   2. webhook_server.py MUST be running (Terminal 2)")
-    print("   3. Both must have correct .env configuration")
-    print("   4. LiveKit and OpenAI credentials must be valid")
+    
+    if TEST_MODE == 'deployed':
+        print("\n🔷 MODE: Testing with DEPLOYED agent on LiveKit Cloud")
+        print("\n⚠️  IMPORTANT REQUIREMENTS:")
+        print("   1. Agent deployed on LiveKit Cloud (already done)")
+        print("   2. webhook_server.py MUST be running (Terminal 1)")
+        print("   3. Environment variables set in LiveKit Cloud dashboard:")
+        print("      → OPENAI_API_KEY (required)")
+        print("      → VOICE_MODEL, LOG_LEVEL (optional)")
+        print("   4. webhook_server.py must have correct .env configuration")
+        print("   5. LiveKit and OpenAI credentials must be valid")
+    else:
+        print("\n🔷 MODE: Testing with LOCAL agent (agent.py)")
+        print("\n⚠️  IMPORTANT REQUIREMENTS:")
+        print("   1. agent.py MUST be running (Terminal 1)")
+        print("   2. webhook_server.py MUST be running (Terminal 2)")
+        print("   3. Both must have correct .env configuration")
+        print("   4. LiveKit and OpenAI credentials must be valid")
     print("\n📋 This test simulates a complete phone call:")
     print("   → HTTP call initiation (like Twilio receiving call)")
     print("   → WebSocket connection (like Twilio streaming audio)")
@@ -349,7 +408,10 @@ async def run_full_system_test():
     print("\n🎯 What to watch:")
     print("   • This terminal: Test progress and results")
     print("   • webhook_server.py terminal: WebSocket connections")
-    print("   • agent.py terminal: Agent activation and processing")
+    if TEST_MODE == 'deployed':
+        print("   • LiveKit Cloud dashboard: Agent activity and logs")
+    else:
+        print("   • agent.py terminal: Agent activation and processing")
     print("\nPress Ctrl+C to abort")
     print("=" * 60)
     
@@ -399,19 +461,38 @@ async def run_full_system_test():
     else:
         print("\n⚠️  FULL SYSTEM TEST DID NOT COMPLETE SUCCESSFULLY")
         print("\n🔍 Troubleshooting:")
-        print("  1. Make sure agent.py is running:")
-        print("     • Check for 'Agent ready' message")
-        print("     • Look for room connection logs")
-        print("     • Verify LiveKit credentials")
-        print("\n  2. Check webhook_server.py logs:")
-        print("     • Should show WebSocket connection")
-        print("     • Should show audio streaming activity")
-        print("\n  3. Verify environment variables:")
-        print("     • LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET")
-        print("     • OPENAI_API_KEY")
-        print("\n  4. Check for errors in both terminals")
-        print("\n  5. Try running test_webhook_deployment.py first:")
-        print("     python test_webhook_deployment.py --quick")
+        if TEST_MODE == 'deployed':
+            print("  1. Check deployed agent status:")
+            print("     • Run: lk agent status")
+            print("     • Check LiveKit Cloud dashboard")
+            print("     • Verify agent is RUNNING")
+            print("     • Check agent logs: lk agent logs")
+            print("\n  2. Verify environment variables in LiveKit Cloud:")
+            print("     • OPENAI_API_KEY must be set in dashboard")
+            print("     • Run: lk agent update --secrets OPENAI_API_KEY=your-key")
+            print("\n  3. Check webhook_server.py logs:")
+            print("     • Should show WebSocket connection")
+            print("     • Should show audio streaming activity")
+            print("     • Should show LiveKit room creation")
+            print("\n  4. Verify webhook_server.py .env configuration:")
+            print("     • LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET")
+            print("\n  5. Check LiveKit Cloud dashboard:")
+            print("     • Agent should show activity when room is created")
+            print("     • Check agent logs for errors")
+        else:
+            print("  1. Make sure agent.py is running:")
+            print("     • Check for 'Agent ready' message")
+            print("     • Look for room connection logs")
+            print("     • Verify LiveKit credentials")
+            print("\n  2. Check webhook_server.py logs:")
+            print("     • Should show WebSocket connection")
+            print("     • Should show audio streaming activity")
+            print("\n  3. Verify environment variables:")
+            print("     • LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET")
+            print("     • OPENAI_API_KEY")
+            print("\n  4. Check for errors in both terminals")
+            print("\n  5. Try running test_webhook_deployment.py first:")
+            print("     python test_webhook_deployment.py --quick")
     
     print("\n" + "=" * 60)
 
@@ -423,13 +504,23 @@ Full System Test - Simulated Phone Call
 
 This script tests your COMPLETE voice agent system including:
   • webhook_server.py (HTTP + WebSocket)
-  • agent.py (LiveKit + OpenAI)
+  • agent.py (Local or Deployed on LiveKit Cloud)
   • Audio streaming (bidirectional)
   • Real AI interaction
 
 This is the most comprehensive test without making a real phone call.
 
-Prerequisites:
+Modes:
+  Local Mode (default):
+    • Tests with agent.py running locally
+    • Requires agent.py running in Terminal 1
+    
+  Deployed Mode (--deployed flag):
+    • Tests with agent deployed on LiveKit Cloud
+    • No local agent.py needed
+    • Agent should auto-join rooms when created
+
+Prerequisites for LOCAL mode:
     1. agent.py running in Terminal 1
        → Should show: "Agent ready - ULTRA-LOW LATENCY MODE ACTIVE!"
     
@@ -440,12 +531,32 @@ Prerequisites:
        → LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET
        → OPENAI_API_KEY
        → TWILIO credentials (optional for this test)
+
+Prerequisites for DEPLOYED mode:
+    1. Agent deployed on LiveKit Cloud
+       → Run: lk agent create (if not already deployed)
+       → Verify: lk agent status shows RUNNING
     
-    4. Dependencies installed:
+    2. Environment variables set in LiveKit Cloud:
+       → OPENAI_API_KEY (required)
+       → Set via: lk agent update --secrets OPENAI_API_KEY=your-key
+       → Or in LiveKit Cloud dashboard
+    
+    3. webhook_server.py running locally
+       → Should show: "⚡ ULTRA-LOW LATENCY Webhook Server"
+       → Must have correct .env configuration
+    
+    4. .env file for webhook_server.py:
+       → LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET
+       → (OPENAI_API_KEY not needed for webhook_server.py)
+    
+    5. Dependencies installed:
        → pip install websockets aiohttp numpy
 
 Usage:
-    python test_full_system.py
+    python test_full_system.py              # Test with LOCAL agent
+    python test_full_system.py --deployed   # Test with DEPLOYED agent
+    python test_full_system.py --help       # Show this help
 
 What gets tested:
     ✓ HTTP webhook endpoints
@@ -497,11 +608,20 @@ Troubleshooting:
 async def main():
     """Main entry point"""
     import sys
+    global TEST_MODE
     
     # Check command line arguments
     if '--help' in sys.argv or '-h' in sys.argv:
         print_help()
         return
+    
+    # Check for --deployed flag
+    if '--deployed' in sys.argv:
+        TEST_MODE = 'deployed'
+        print("\n🔷 Running test with DEPLOYED agent on LiveKit Cloud")
+    else:
+        TEST_MODE = 'local'
+        print("\n🔷 Running test with LOCAL agent (agent.py)")
     
     # Run full system test
     await run_full_system_test()
