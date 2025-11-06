@@ -1,14 +1,27 @@
 """
-Twilio Webhook Server - LiveKit SIP Integration
-Handles incoming phone calls and connects them directly to LiveKit via SIP Trunk
+Twilio Webhook Server
+Handles incoming phone calls and connects them to LiveKit rooms
 
-Uses LiveKit SIP for ultra-low latency voice calls (500-700ms response time)
-Direct phone → SIP → LiveKit → AI Agent connection
+IMPORTANT: This implementation uses Twilio Media Streams to bridge phone audio to LiveKit.
+For production use, LiveKit SIP Trunk integration is recommended as it's more reliable
+and handles all audio conversion automatically.
 """
 
 import logging
-from fastapi import FastAPI, Request, Response
+import json
+import base64
+import asyncio
+import numpy as np
+
+# Use audioop-lts for Python 3.13+ compatibility
+try:
+    import audioop
+except ModuleNotFoundError:
+    # Python 3.13+ removed audioop, use audioop-lts instead
+    import audioop_lts as audioop
+from fastapi import FastAPI, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.responses import PlainTextResponse
+from livekit import api, rtc
 import uvicorn
 from config import Config
 
@@ -45,8 +58,8 @@ async def health():
 @app.post("/incoming-call")
 async def incoming_call(request: Request):
     """
-    Handle incoming Twilio calls via LiveKit SIP
-    Creates a unique room and connects call directly via SIP trunk
+    Handle incoming Twilio calls
+    Uses Twilio Media Streams to connect phone audio to LiveKit room
     """
     try:
         # Get call details from Twilio
@@ -65,17 +78,25 @@ async def incoming_call(request: Request):
         
         logger.info(f"✓ Created room '{room_name}' for call {call_sid}")
         
-        # Create SIP URI for LiveKit
-        sip_uri = f"sip:{room_name}@{Config.LIVEKIT_SIP_DOMAIN}"
+        # Get the public URL for the WebSocket endpoint
+        # In production, this should be your deployed URL
+        # For local testing with ngrok, this will be your ngrok URL
+        webhook_base_url = request.url.scheme + "://" + request.url.netloc
+        stream_url = f"{webhook_base_url.replace('http', 'ws')}/media-stream"
         
-        logger.info(f"🔗 SIP URI: {sip_uri}")
+        logger.info(f"🔗 Stream URL: {stream_url}")
         
-        # Create TwiML response with SIP dial
+        # Create TwiML response with Media Streams
+        # This streams bidirectional audio between Twilio and our WebSocket handler
         twiml_response = f"""<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-    <Dial>
-        <Sip>{sip_uri}</Sip>
-    </Dial>
+    <Connect>
+        <Stream url="{stream_url}">
+            <Parameter name="callSid" value="{call_sid}"/>
+            <Parameter name="roomName" value="{room_name}"/>
+            <Parameter name="fromNumber" value="{from_number}"/>
+        </Stream>
+    </Connect>
 </Response>"""
         
         logger.info(f"✓ TwiML response created for {call_sid}")
@@ -102,18 +123,8 @@ async def incoming_call(request: Request):
         )
 
 
-# ============================================================================
-# LEGACY: Twilio Media Streams WebSocket Handler
-# 
-# This code is kept for reference but NOT USED with LiveKit SIP.
-# With SIP, audio flows directly: Phone → Twilio → LiveKit SIP → Agent
-# No WebSocket bridge needed!
-#
-# If you need to fall back to Media Streams, uncomment and set USE_LIVEKIT_SIP=false
-# ============================================================================
-
-# @app.websocket("/media-stream")
-async def media_stream_legacy(websocket: WebSocket):
+@app.websocket("/media-stream")
+async def media_stream(websocket: WebSocket):
     """
     WebSocket endpoint for Twilio Media Streams
     Bridges audio between Twilio phone call and LiveKit room
@@ -330,25 +341,22 @@ async def metrics():
 
 def main():
     """Start the webhook server"""
-    logger.info("=" * 70)
-    logger.info("🚀 Voice Agent Webhook Server - LiveKit SIP Integration")
-    logger.info("=" * 70)
+    logger.info("=" * 60)
+    logger.info("🚀 Starting Voice Agent Webhook Server")
+    logger.info("=" * 60)
     logger.info(f"Host: {Config.WEBHOOK_HOST}")
     logger.info(f"Port: {Config.WEBHOOK_PORT}")
     logger.info(f"Max concurrent calls: {Config.MAX_CONCURRENT_CALLS}")
-    logger.info(f"SIP Domain: {Config.LIVEKIT_SIP_DOMAIN}")
-    logger.info("=" * 70)
+    logger.info("=" * 60)
     logger.info("")
     logger.info("📝 Configure your Twilio phone number webhook to:")
     logger.info(f"   https://your-domain.com/incoming-call")
     logger.info("")
-    logger.info("⚡ Features:")
-    logger.info("   - Ultra-low latency (500-700ms response time)")
-    logger.info("   - Direct SIP connection (Phone → LiveKit SIP → Agent)")
-    logger.info("   - No WebSocket overhead")
-    logger.info("   - Superior audio quality")
-    logger.info("")
-    logger.info("=" * 70)
+    logger.info("💡 For local testing with ngrok:")
+    logger.info(f"   1. Run: ngrok http {Config.WEBHOOK_PORT}")
+    logger.info("   2. Copy the HTTPS URL from ngrok")
+    logger.info("   3. Set Twilio webhook to: https://YOUR-NGROK-URL/incoming-call")
+    logger.info("=" * 60)
     
     # Start the server
     uvicorn.run(
