@@ -18,7 +18,7 @@ This voice agent connects phone calls to an AI assistant using:
 
 **Everything you need is in one place:**
 
-### **➡️ [COMPLETE_SETUP_GUIDE.md](COMPLETE_SETUP_GUIDE.md)**
+### **➡️ [COMPLETE_SETUP_GUIDE.md](COMPLETE_SETUP_GUIDE.md)** - Local Development
 
 This comprehensive guide covers:
 - ✅ Account setup (LiveKit, OpenAI, Twilio)
@@ -26,9 +26,24 @@ This comprehensive guide covers:
 - ✅ Running the agent locally
 - ✅ Performance expectations & cost estimates
 - ✅ Fine-tuning for your use case
-- ✅ Production deployment
 - ✅ Troubleshooting
 - ✅ Monitoring & maintenance
+
+### **➡️ [LIVEKIT_CLOUD_QUICKSTART.md](LIVEKIT_CLOUD_QUICKSTART.md)** - Deploy Agent to LiveKit Cloud
+
+**Recommended for lowest latency!** Quick 5-minute deployment:
+- ⚡ Deploy agent.py to LiveKit Cloud
+- 🚀 Ultra-low latency (200-400ms)
+- 📊 Auto-scaling and monitoring
+- 🔧 Managed service
+
+### **➡️ [LIVEKIT_CLOUD_DEPLOYMENT.md](LIVEKIT_CLOUD_DEPLOYMENT.md)** - Complete LiveKit Cloud Guide
+
+Detailed deployment guide:
+- Step-by-step instructions
+- Configuration details
+- Troubleshooting
+- Monitoring and optimization
 
 ---
 
@@ -196,12 +211,28 @@ SYSTEM_PROMPT=Friendly AI assistant. Answer in 1-2 sentences.
 
 ## 🚀 Production Deployment
 
-Ready for production? The guide covers:
+### **⚡ Deploy Agent to LiveKit Cloud (Recommended - Lowest Latency)**
+
+**Best option for ultra-low latency!** Deploy your agent directly to LiveKit Cloud:
+
+- ⚡ **200-400ms latency** - Agent runs on same infrastructure as LiveKit server
+- 🚀 **Auto-scaling** - Automatically handles concurrent calls
+- 🔧 **Managed service** - No server management needed
+- 📊 **Built-in monitoring** - Dashboard with metrics and logs
+
+**Quick Deploy:**
+- **[LIVEKIT_CLOUD_QUICKSTART.md](LIVEKIT_CLOUD_QUICKSTART.md)** - 5-minute deployment guide
+- **[LIVEKIT_CLOUD_DEPLOYMENT.md](LIVEKIT_CLOUD_DEPLOYMENT.md)** - Complete detailed guide
+
+**Note:** You still need to deploy `webhook_server.py` separately (Railway/Render/Fly.io) for Twilio integration.
+
+### **Alternative: Self-Hosted Deployment**
+
+For more control, deploy both agent and webhook yourself:
 - Render.com deployment (easiest, ~$14/month)
 - AWS/GCP deployment (more control)
 - SSL setup & domain configuration
 - Monitoring & auto-scaling
-- Cost optimization strategies
 
 **See [COMPLETE_SETUP_GUIDE.md](COMPLETE_SETUP_GUIDE.md#deployment-to-production)**
 
