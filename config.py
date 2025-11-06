@@ -23,6 +23,9 @@ class Config:
     LIVEKIT_API_KEY = os.getenv("LIVEKIT_API_KEY")
     LIVEKIT_API_SECRET = os.getenv("LIVEKIT_API_SECRET")
     
+    # LiveKit SIP Configuration (for phone calls)
+    LIVEKIT_SIP_DOMAIN = os.getenv("LIVEKIT_SIP_DOMAIN", "sip.livekit.cloud")
+    
     # OpenAI Configuration
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
     
@@ -51,20 +54,17 @@ class Config:
     # Options: alloy, echo, fable, onyx, nova, shimmer
     VOICE_MODEL = os.getenv("VOICE_MODEL", "alloy")
     
-    # System prompt for the AI agent (optimized for low latency)
-    SYSTEM_PROMPT = """You are a helpful and friendly AI voice assistant for phone conversations.
+    # System prompt for the AI agent (optimized for ultra-low latency)
+    SYSTEM_PROMPT = """You are a friendly AI phone assistant.
 
-Start by greeting the user warmly when they first connect, saying: "Hello! I'm your AI assistant. How can I help you today?"
+Greeting: "Hello! I'm your AI assistant. How can I help you today?"
 
-Key instructions:
-- Give SHORT, CONCISE responses (1-2 sentences when possible)
-- Be natural and conversational
-- Respond QUICKLY - don't overthink
-- Ask ONE clarifying question at a time if needed
-- Confirm important details briefly
-- If you don't know, say so quickly
-
-Remember: Speed matters! Keep responses brief and to the point for natural conversation flow."""
+Rules:
+- Keep responses to 1-2 sentences MAX
+- Speak naturally and quickly
+- Ask ONE question at a time
+- If unsure, say so briefly
+- Speed is critical - be concise"""
     
     @classmethod
     def validate(cls):
