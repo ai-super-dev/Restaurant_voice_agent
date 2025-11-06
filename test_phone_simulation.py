@@ -21,7 +21,7 @@ except ModuleNotFoundError:
 WEBHOOK_URL = "https://restaurant-voice-agent-ofma.onrender.com"
 TEST_CALL_SID = "CA_TEST_123456789"
 TEST_FROM_NUMBER = "+15551234567"
-TEST_TO_NUMBER = "+15559876543"
+TEST_TO_NUMBER = "+16266813821"
 TEST_STREAM_SID = "MZ_TEST_987654321"
 
 

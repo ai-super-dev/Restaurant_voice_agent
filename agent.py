@@ -53,17 +53,16 @@ async def entrypoint(ctx: JobContext):
         
         # Create RealtimeModel with production-optimized settings
         # CRITICAL: Use ONLY OpenAI's Server VAD - NO local VAD
-        # Production (cloud) needs higher threshold for network stability
-        # Slightly higher silence_duration accounts for network latency
+        # Phone call settings: Higher threshold and longer silence for stability
         realtime_model = openai.realtime.RealtimeModel(
             voice=Config.VOICE_MODEL,
             temperature=0.8,
             modalities=["text", "audio"],
             turn_detection=TurnDetection(
                 type="server_vad",
-                threshold=0.7,  # Higher for production stability (cloud deployment)
+                threshold=0.8,  # Higher threshold for phone calls (less sensitive)
                 prefix_padding_ms=300,  # Standard for network reliability
-                silence_duration_ms=400,  # Balanced for cloud + <1s latency
+                silence_duration_ms=600,  # Longer silence detection for phone stability
             ),
         )
         
@@ -83,10 +82,10 @@ async def entrypoint(ctx: JobContext):
         logger.info(f"💡 Speak first to start - say 'Hello'")
         await session.start(agent, room=ctx.room)
         
-        logger.info(f"✅ Realtime agent ready - PRODUCTION optimized!")
-        logger.info(f"✅ VAD threshold: 0.7 (production-grade stability)")
-        logger.info(f"✅ Silence duration: 400ms (cloud-optimized)")
-        logger.info(f"✅ Expected latency: 600-900ms (including network)")
+        logger.info(f"✅ Realtime agent ready - PHONE CALL optimized!")
+        logger.info(f"✅ VAD threshold: 0.8 (phone-optimized, less sensitive)")
+        logger.info(f"✅ Silence duration: 600ms (prevents premature interruptions)")
+        logger.info(f"✅ Expected latency: 700-1000ms (including phone network)")
         logger.info(f"✅ Deployment: Cloud-ready (Render.com, etc.)")
         
         # Keep the session running until disconnect
@@ -120,11 +119,11 @@ def main():
     logger.info(f"   - TTS Fallback: ENABLED (prevents cancelled responses)")
     logger.info(f"   - Voice Model: {Config.VOICE_MODEL}")
     logger.info("")
-    logger.info("📊 Performance settings (PRODUCTION optimized):")
-    logger.info(f"   - Server VAD threshold: 0.7 (production-grade)")
+    logger.info("📊 Performance settings (PHONE CALL optimized):")
+    logger.info(f"   - Server VAD threshold: 0.8 (phone-optimized)")
     logger.info(f"   - Prefix padding: 300ms (network-stable)")
-    logger.info(f"   - Silence duration: 400ms (cloud-optimized)")
-    logger.info(f"   - Expected latency: 600-900ms (including network)")
+    logger.info(f"   - Silence duration: 600ms (prevents cancellations)")
+    logger.info(f"   - Expected latency: 700-1000ms (including phone network)")
     logger.info(f"   - NO local VAD (avoids conflicts)")
     logger.info(f"   - Auto-subscribe: Audio only")
     logger.info(f"   - Full-duplex streaming: Enabled")
