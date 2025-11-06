@@ -116,7 +116,11 @@ async def incoming_call(request: Request):
         # In production, this should be your deployed URL
         # For local testing with ngrok, this will be your ngrok URL
         webhook_base_url = request.url.scheme + "://" + request.url.netloc
-        stream_url = f"{webhook_base_url.replace('http', 'ws')}/media-stream"
+        # Convert http/https to ws/wss
+        if webhook_base_url.startswith('https://'):
+            stream_url = webhook_base_url.replace('https://', 'wss://') + "/media-stream"
+        else:
+            stream_url = webhook_base_url.replace('http://', 'ws://') + "/media-stream"
         
         logger.info(f"🔗 Stream URL: {stream_url}")
         

@@ -15,6 +15,8 @@ Modes:
 """
 
 import asyncio
+import os
+import sys
 import websockets
 import aiohttp
 import json
@@ -31,8 +33,9 @@ except ModuleNotFoundError:
 
 
 # Configuration
-WEBHOOK_URL = "http://localhost:8000"
-WS_URL = "ws://localhost:8000"
+# Default to localhost, but can be overridden via command line or environment variable
+WEBHOOK_URL = os.getenv("WEBHOOK_URL", "http://localhost:8000")
+WS_URL = os.getenv("WS_URL", "ws://localhost:8000")
 TEST_CALL_SID = "CA_TEST_FULL_SYSTEM"
 TEST_STREAM_SID = "MZ_TEST_STREAM"
 TEST_FROM_NUMBER = "+15551234567"
@@ -96,39 +99,81 @@ async def test_webhook_call_initiation():
     print("TEST 1: Call Initiation (HTTP → TwiML)")
     print("="*60)
     
-    try:
-        async with aiohttp.ClientSession() as session:
-            form_data = aiohttp.FormData()
-            form_data.add_field('CallSid', TEST_CALL_SID)
-            form_data.add_field('From', TEST_FROM_NUMBER)
-            form_data.add_field('To', TEST_TO_NUMBER)
-            form_data.add_field('CallStatus', 'ringing')
+    # Create timeout settings for Render.com (handles cold starts)
+    timeout = aiohttp.ClientTimeout(total=30, connect=10)
+    
+    # Retry logic for cold starts on Render.com
+    max_retries = 3
+    retry_delay = 2
+    
+    for attempt in range(max_retries):
+        try:
+            if attempt > 0:
+                print(f"🔄 Retry attempt {attempt + 1}/{max_retries} (Render.com might be cold starting...)")
+                await asyncio.sleep(retry_delay)
             
-            async with session.post(f"{WEBHOOK_URL}/incoming-call", data=form_data) as response:
-                twiml = await response.text()
-                print(f"✅ Status: {response.status}")
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                form_data = aiohttp.FormData()
+                form_data.add_field('CallSid', TEST_CALL_SID)
+                form_data.add_field('From', TEST_FROM_NUMBER)
+                form_data.add_field('To', TEST_TO_NUMBER)
+                form_data.add_field('CallStatus', 'ringing')
                 
-                # Parse TwiML to get WebSocket URL
-                root = ET.fromstring(twiml)
-                stream = root.find('.//Stream')
-                stream_url = stream.get('url')
+                print(f"📤 Sending POST to {WEBHOOK_URL}/incoming-call...")
                 
-                print(f"✅ Got TwiML with WebSocket URL: {stream_url}")
-                
-                params = stream.findall('Parameter')
-                param_dict = {p.get('name'): p.get('value') for p in params}
-                room_name = param_dict.get('roomName')
-                
-                print(f"✅ Room Name: {room_name}")
-                print(f"✅ Call SID: {param_dict.get('callSid')}")
-                
-                return stream_url, room_name
-                
-    except Exception as e:
-        print(f"❌ Error: {e}")
-        import traceback
-        traceback.print_exc()
-        return None, None
+                async with session.post(f"{WEBHOOK_URL}/incoming-call", data=form_data) as response:
+                    if response.status != 200:
+                        print(f"⚠️  Status: {response.status} (expected 200)")
+                        if attempt < max_retries - 1:
+                            continue
+                        return None, None
+                    
+                    twiml = await response.text()
+                    print(f"✅ Status: {response.status}")
+                    
+                    # Parse TwiML to get WebSocket URL
+                    root = ET.fromstring(twiml)
+                    stream = root.find('.//Stream')
+                    if stream is None:
+                        print(f"❌ No Stream element found in TwiML response")
+                        print(f"Response: {twiml[:200]}...")
+                        return None, None
+                    
+                    stream_url = stream.get('url')
+                    
+                    print(f"✅ Got TwiML with WebSocket URL: {stream_url}")
+                    
+                    params = stream.findall('Parameter')
+                    param_dict = {p.get('name'): p.get('value') for p in params}
+                    room_name = param_dict.get('roomName')
+                    
+                    print(f"✅ Room Name: {room_name}")
+                    print(f"✅ Call SID: {param_dict.get('callSid')}")
+                    
+                    return stream_url, room_name
+                    
+        except asyncio.TimeoutError:
+            print(f"⏱️  Timeout after {timeout.total}s (Render.com might be cold starting)")
+            if attempt < max_retries - 1:
+                continue
+            print("❌ Failed after all retries")
+            return None, None
+        except aiohttp.ClientError as e:
+            print(f"❌ Connection error: {e}")
+            if attempt < max_retries - 1:
+                continue
+            import traceback
+            traceback.print_exc()
+            return None, None
+        except Exception as e:
+            print(f"❌ Error: {e}")
+            if attempt < max_retries - 1:
+                continue
+            import traceback
+            traceback.print_exc()
+            return None, None
+    
+    return None, None
 
 
 async def test_websocket_connection_and_audio():
@@ -386,11 +431,18 @@ async def run_full_system_test():
         print("\n🔷 MODE: Testing with DEPLOYED agent on LiveKit Cloud")
         print("\n⚠️  IMPORTANT REQUIREMENTS:")
         print("   1. Agent deployed on LiveKit Cloud (already done)")
-        print("   2. webhook_server.py MUST be running (Terminal 1)")
+        if WEBHOOK_URL.startswith("http://localhost") or WEBHOOK_URL.startswith("ws://localhost"):
+            print("   2. webhook_server.py MUST be running locally (Terminal 1)")
+        else:
+            print(f"   2. webhook_server.py deployed at: {WEBHOOK_URL}")
         print("   3. Environment variables set in LiveKit Cloud dashboard:")
         print("      → OPENAI_API_KEY (required)")
         print("      → VOICE_MODEL, LOG_LEVEL (optional)")
-        print("   4. webhook_server.py must have correct .env configuration")
+        if not (WEBHOOK_URL.startswith("http://localhost") or WEBHOOK_URL.startswith("ws://localhost")):
+            print("   4. webhook_server.py on Render.com must have correct environment variables:")
+            print("      → LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET")
+        else:
+            print("   4. webhook_server.py must have correct .env configuration")
         print("   5. LiveKit and OpenAI credentials must be valid")
     else:
         print("\n🔷 MODE: Testing with LOCAL agent (agent.py)")
@@ -407,7 +459,10 @@ async def run_full_system_test():
     print("   → Audio response (agent speaking back)")
     print("\n🎯 What to watch:")
     print("   • This terminal: Test progress and results")
-    print("   • webhook_server.py terminal: WebSocket connections")
+    if WEBHOOK_URL.startswith("http://localhost") or WEBHOOK_URL.startswith("ws://localhost"):
+        print("   • webhook_server.py terminal: WebSocket connections")
+    else:
+        print(f"   • Render.com logs: Check webhook server at {WEBHOOK_URL}")
     if TEST_MODE == 'deployed':
         print("   • LiveKit Cloud dashboard: Agent activity and logs")
     else:
@@ -554,9 +609,15 @@ Prerequisites for DEPLOYED mode:
        → pip install websockets aiohttp numpy
 
 Usage:
-    python test_full_system.py              # Test with LOCAL agent
-    python test_full_system.py --deployed   # Test with DEPLOYED agent
-    python test_full_system.py --help       # Show this help
+    python test_full_system.py                              # Test with LOCAL agent + LOCAL webhook
+    python test_full_system.py --deployed                   # Test with DEPLOYED agent + LOCAL webhook
+    python test_full_system.py --webhook-url https://...    # Test with DEPLOYED webhook (Render.com)
+    python test_full_system.py --deployed --webhook-url https://...  # Test with both DEPLOYED
+    python test_full_system.py --help                       # Show this help
+    
+    # Or set environment variable:
+    set WEBHOOK_URL=https://your-app.onrender.com
+    python test_full_system.py --deployed
 
 What gets tested:
     ✓ HTTP webhook endpoints
@@ -607,14 +668,14 @@ Troubleshooting:
 
 async def main():
     """Main entry point"""
-    import sys
-    global TEST_MODE
+    global TEST_MODE, WEBHOOK_URL, WS_URL
     
     # Check command line arguments
     if '--help' in sys.argv or '-h' in sys.argv:
         print_help()
         return
     
+    # Parse command line arguments
     # Check for --deployed flag
     if '--deployed' in sys.argv:
         TEST_MODE = 'deployed'
@@ -622,6 +683,26 @@ async def main():
     else:
         TEST_MODE = 'local'
         print("\n🔷 Running test with LOCAL agent (agent.py)")
+    
+    # Check for --webhook-url flag
+    if '--webhook-url' in sys.argv:
+        idx = sys.argv.index('--webhook-url')
+        if idx + 1 < len(sys.argv):
+            webhook_url = sys.argv[idx + 1]
+            WEBHOOK_URL = webhook_url
+            # Convert http to ws for WebSocket URL
+            WS_URL = webhook_url.replace('http://', 'ws://').replace('https://', 'wss://')
+            print(f"\n🌐 Using deployed webhook server: {WEBHOOK_URL}")
+        else:
+            print("❌ Error: --webhook-url requires a URL")
+            print("   Example: --webhook-url https://your-app.onrender.com")
+            return
+    
+    # Check if WEBHOOK_URL is set via environment variable
+    if os.getenv("WEBHOOK_URL"):
+        WEBHOOK_URL = os.getenv("WEBHOOK_URL")
+        WS_URL = WEBHOOK_URL.replace('http://', 'ws://').replace('https://', 'wss://')
+        print(f"\n🌐 Using webhook URL from environment: {WEBHOOK_URL}")
     
     # Run full system test
     await run_full_system_test()
