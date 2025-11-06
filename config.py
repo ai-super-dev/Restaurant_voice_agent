@@ -23,6 +23,9 @@ class Config:
     LIVEKIT_API_KEY = os.getenv("LIVEKIT_API_KEY")
     LIVEKIT_API_SECRET = os.getenv("LIVEKIT_API_SECRET")
     
+    # LiveKit SIP Configuration (for phone calls)
+    LIVEKIT_SIP_DOMAIN = os.getenv("LIVEKIT_SIP_DOMAIN", "sip.livekit.cloud")
+    
     # OpenAI Configuration
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
     
@@ -37,34 +40,23 @@ class Config:
     WEBHOOK_PORT = int(os.getenv("WEBHOOK_PORT", "8000"))
     WEBHOOK_HOST = os.getenv("WEBHOOK_HOST", "0.0.0.0")
     
-    # Performance Settings
-    MAX_CONCURRENT_CALLS = int(os.getenv("MAX_CONCURRENT_CALLS", "150"))
+    # Performance Settings - ULTRA-LOW LATENCY OPTIMIZED
+    MAX_CONCURRENT_CALLS = int(os.getenv("MAX_CONCURRENT_CALLS", "200"))
     ENABLE_METRICS = os.getenv("ENABLE_METRICS", "true").lower() == "true"
-    LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
+    LOG_LEVEL = os.getenv("LOG_LEVEL", "WARNING")  # Reduced logging for performance
     
-    # AI Model Settings (optimized for ultra-low latency)
-    # Note: Realtime API uses gpt-4o-realtime-preview model automatically
-    # This setting is kept for compatibility but Realtime API model is fixed
+    # Webhook server settings for high concurrency
+    MAX_WORKERS = int(os.getenv("MAX_WORKERS", "4"))  # Async worker threads (webhook server only)
+    
+    # AI Model Settings - ULTRA-LOW LATENCY OPTIMIZED
     OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-realtime-preview")
     
-    # Voice settings for Realtime API
-    # Options: alloy, echo, fable, onyx, nova, shimmer
+    # Voice settings for Realtime API (alloy = fastest)
     VOICE_MODEL = os.getenv("VOICE_MODEL", "alloy")
     
-    # System prompt for the AI agent (optimized for low latency)
-    SYSTEM_PROMPT = """You are a helpful and friendly AI voice assistant for phone conversations.
-
-Start by greeting the user warmly when they first connect, saying: "Hello! I'm your AI assistant. How can I help you today?"
-
-Key instructions:
-- Give SHORT, CONCISE responses (1-2 sentences when possible)
-- Be natural and conversational
-- Respond QUICKLY - don't overthink
-- Ask ONE clarifying question at a time if needed
-- Confirm important details briefly
-- If you don't know, say so quickly
-
-Remember: Speed matters! Keep responses brief and to the point for natural conversation flow."""
+    # System prompt - ULTRA-SHORT for MAXIMUM SPEED
+    # Every word here adds latency - keep it minimal!
+    SYSTEM_PROMPT = os.getenv("SYSTEM_PROMPT", """Friendly AI assistant. Be brief. 1 sentence answers. Speak fast.""")
     
     @classmethod
     def validate(cls):
